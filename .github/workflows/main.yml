@@ -1,0 +1,87 @@
+name: Build JARVIS APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:   # lets you trigger manually from GitHub UI
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout your code ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Java 17 (required by Android Gradle plugin 8.x) ────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ── 3. Android SDK ─────────────────────────────────────────────────────
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── 4. Accept SDK licenses ─────────────────────────────────────────────
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      # ── 5. Re-download gradle-wrapper.jar (fixes ClassNotFoundException) ──
+      - name: Download Gradle wrapper jar
+        run: |
+          curl -fL "https://github.com/gradle/gradle/raw/v8.6.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+
+      # ── 6. Make gradlew executable ─────────────────────────────────────────
+      - name: Grant execute permission to gradlew
+        run: chmod +x gradlew
+
+      # ── 6. Cache Gradle dependencies (speeds up future builds) ─────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── 7. Build the debug APK ─────────────────────────────────────────────
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+
+      # ── 8. Rename APK with version + date ─────────────────────────────────
+      - name: Rename APK
+        run: |
+          DATE=$(date +%Y%m%d-%H%M)
+          mv app/build/outputs/apk/debug/app-debug.apk \
+             app/build/outputs/apk/debug/JarvisAI-debug-${DATE}.apk
+          echo "APK_NAME=JarvisAI-debug-${DATE}.apk" >> $GITHUB_ENV
+
+      # ── 9. Upload APK as downloadable artifact ─────────────────────────────
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30   # APK stays available for 30 days
+
+      # ── 10. Print download instructions ───────────────────────────────────
+      - name: Build complete
+        run: |
+          echo "✅ Build successful!"
+          echo "📱 To download your APK:"
+          echo "   1. Go to your GitHub repo"
+          echo "   2. Click 'Actions' tab"
+          echo "   3. Click the latest successful workflow run"
+          echo "   4. Scroll to 'Artifacts' at the bottom"
+          echo "   5. Download your APK"
